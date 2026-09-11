@@ -1,0 +1,104 @@
+---
+# deploy.yml
+#
+# Expects these extra-vars (already passed by the Jenkinsfile):
+#   artifact_dir      - path on the Ansible control node to the *extracted* artifact
+#                        (e.g. /opt/deployments/extracted)
+#   deploy_components  - comma separated component names requested by the user
+#                        (e.g. "mcbatch,dbdelivery")
+#
+# Targets whatever hosts/group is passed via -i inventory + --limit from Jenkins.
+
+- name: Deploy selected components to VSI hosts
+  hosts: all
+  gather_facts: no
+
+  vars:
+    remote_deploy_dir: "/opt/app/deploy"          # CUSTOMIZE: base dir on remote VSI hosts
+    remote_owner: "appuser"                        # CUSTOMIZE: file owner on remote hosts
+    remote_group: "appuser"                        # CUSTOMIZE: file group on remote hosts
+    components_list: "{{ deploy_components.split(',') }}"
+
+  tasks:
+
+    - name: Check presence of each requested component in extracted artifact
+      stat:
+        path: "{{ artifact_dir }}/{{ item }}"
+      delegate_to: localhost
+      run_once: true
+      loop: "{{ components_list }}"
+      register: component_stat
+
+    - name: Build list of components that actually exist in the artifact
+      set_fact:
+        available_components: "{{ component_stat.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+
+    - name: Show which components were requested vs. which will be deployed
+      debug:
+        msg:
+          - "Requested components: {{ components_list }}"
+          - "Found in artifact and will be deployed: {{ available_components }}"
+
+    - name: Warn about requested components NOT found in artifact
+      debug:
+        msg: "WARNING: component '{{ item }}' was requested but no matching folder was found under {{ artifact_dir }}"
+      loop: "{{ components_list }}"
+      when: item not in available_components
+
+    # -----------------------------------------------------------------
+    # Component-specific deployment blocks.
+    # Add one block per component your artifact can contain, following
+    # the same pattern: copy files, then any component-specific steps
+    # (service restarts, running a delivery script, DB migration, etc.)
+    # -----------------------------------------------------------------
+
+    - name: Deploy mcbatch component
+      when: "'mcbatch' in available_components"
+      block:
+        - name: Copy mcbatch files to remote host
+          copy:
+            src: "{{ artifact_dir }}/mcbatch/"
+            dest: "{{ remote_deploy_dir }}/mcbatch/"
+            owner: "{{ remote_owner }}"
+            group: "{{ remote_group }}"
+            mode: '0755'
+
+        # CUSTOMIZE / ADD: e.g. restart a service, run a startup script, etc.
+        # - name: Restart mcbatch service
+        #   systemd:
+        #     name: mcbatch
+        #     state: restarted
+        #     become: yes
+
+    - name: Deploy dbdelivery component
+      when: "'dbdelivery' in available_components"
+      block:
+        - name: Copy dbdelivery files to remote host
+          copy:
+            src: "{{ artifact_dir }}/dbdelivery/"
+            dest: "{{ remote_deploy_dir }}/dbdelivery/"
+            owner: "{{ remote_owner }}"
+            group: "{{ remote_group }}"
+            mode: '0755'
+
+        # CUSTOMIZE / ADD: e.g. run the delivery script after copy
+        # - name: Run db delivery script
+        #   command: "{{ remote_deploy_dir }}/dbdelivery/run_delivery.sh"
+        #   args:
+        #     chdir: "{{ remote_deploy_dir }}/dbdelivery"
+
+    # -----------------------------------------------------------------
+    # CUSTOMIZE: duplicate the block above for every other component
+    # your artifact zip can contain, e.g.:
+    #
+    # - name: Deploy <component_name> component
+    #   when: "'<component_name>' in available_components"
+    #   block:
+    #     - name: Copy <component_name> files to remote host
+    #       copy:
+    #         src: "{{ artifact_dir }}/<component_name>/"
+    #         dest: "{{ remote_deploy_dir }}/<component_name>/"
+    #         owner: "{{ remote_owner }}"
+    #         group: "{{ remote_group }}"
+    #         mode: '0755'
+    # -----------------------------------------------------------------
