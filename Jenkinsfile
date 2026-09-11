@@ -5,7 +5,7 @@ pipeline {
         // ---- Application / components repo ----
         string(
             name: 'APP_GIT_REPO_URL',
-            defaultValue: 'https://github.com/akashmhetre12/simple-java-project.git',
+            defaultValue: 'https://github.com/akashmhetre12/Code_patch_deployment.git',
             description: 'Git repo holding the unzipped application components (mcbatch, dbdelivery, etc.)'
         )
         string(
