@@ -114,7 +114,7 @@ pipeline {
                             else
                                 rm -rf ${params.APP_REMOTE_DIR}
                                 mkdir -p \$(dirname ${params.APP_REMOTE_DIR})
-                                git clone -b ${params.APP_GIT_BRANCH} ${params.APP_GIT_REPO_URL} ${params.APP_REMOTE_DIR}
+                                git clone -b master ${params.APP_GIT_REPO_URL} ${params.APP_REMOTE_DIR}
                             fi
                         '
                     """
