@@ -151,7 +151,7 @@ pipeline {
                     sh """
                         ssh -o StrictHostKeyChecking=no ${params.ANSIBLE_REMOTE_USER}@${params.ANSIBLE_CONTROL_HOST} \\
                             "cd ${params.PLAYBOOK_REMOTE_DIR} && \\
-                             ansible-playbook -i inventory/${params.TARGET_ENV} ${params.ANSIBLE_PLAYBOOK} \\
+                             ansible-playbook -i inventory/${params.TARGET_ENV}.ini ${params.ANSIBLE_PLAYBOOK} \\
                              --limit ${params.TARGET_ENV} \\
                              --extra-vars 'deploy_components=${params.COMPONENTS} artifact_dir=${params.APP_REMOTE_DIR}'"
                     """
