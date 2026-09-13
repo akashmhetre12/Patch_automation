@@ -44,8 +44,6 @@ pipeline {
 
     stages {
 
-   stages {
-
         stage('Checkout') {
             steps {
                 checkout scmGit(
