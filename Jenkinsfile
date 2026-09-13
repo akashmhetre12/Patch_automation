@@ -2,61 +2,21 @@ pipeline {
     agent any
 
     parameters {
-        // ---- Application / components repo ----
-        string(
-            name: 'APP_GIT_REPO_URL',
-            defaultValue: 'https://github.com/akashmhetre12/Code_patch_deployment.git',
-            description: 'Git repo holding the unzipped application components (mcbatch, dbdelivery, etc.)'
-        )
+        // ---- The only things a person triggering this build should choose ----
         string(
             name: 'APP_GIT_BRANCH',
             defaultValue: 'main',
             description: 'Branch to checkout/pull from the application components repo'
-        )
-
-        // ---- Ansible playbooks / inventory repo ----
-        string(
-            name: 'PLAYBOOK_GIT_REPO_URL',
-            defaultValue: 'https://github.com/akashmhetre12/Patch_automation.git',
-            description: 'Git repo holding the Ansible playbooks and inventory files'
         )
         string(
             name: 'PLAYBOOK_GIT_BRANCH',
             defaultValue: 'main',
             description: 'Branch to checkout/pull from the Ansible playbooks repo'
         )
-
-        // ---- Ansible control node ----
-        string(
-            name: 'ANSIBLE_CONTROL_HOST',
-            defaultValue: '172.31.5.200',
-            description: 'Hostname or IP of the Ansible control node'
-        )
-        string(
-            name: 'ANSIBLE_REMOTE_USER',
-            defaultValue: 'ubuntu',
-            description: 'SSH user on the Ansible control node'
-        )
-        string(
-            name: 'APP_REMOTE_DIR',
-            defaultValue: '/home/ubuntu/simple-java-project',
-            description: 'Directory on the control node where the APP repo is checked out (this becomes artifact_dir passed to Ansible)'
-        )
-        string(
-            name: 'PLAYBOOK_REMOTE_DIR',
-            defaultValue: '/home/ubuntu/Patch_automation',
-            description: 'Directory on the control node where the PLAYBOOK repo is checked out'
-        )
-       
-        string(
-            name: 'ANSIBLE_PLAYBOOK',
-            defaultValue: 'deploy.yml',
-            description: 'Path RELATIVE to PLAYBOOK_REMOTE_DIR to the deployment playbook'
-        )
         choice(
             name: 'TARGET_ENV',
             choices: ['dev', 'qa', 'UAT', 'prod'],
-            description: 'Target environment / host-group in the inventory (--limit)'
+            description: 'Target environment / host-group (--limit). Also selects inventory/<TARGET_ENV>.ini'
         )
         string(
             name: 'COMPONENTS',
@@ -66,12 +26,25 @@ pipeline {
     }
 
     environment {
+        // ---- Fixed infrastructure config — not exposed as build parameters ----
+        APP_GIT_REPO_URL      = 'https://github.com/akashmhetre12/Code_patch_deployment.git'
+        PLAYBOOK_GIT_REPO_URL = 'https://github.com/akashmhetre12/Patch_automation.git'
+
+        ANSIBLE_CONTROL_HOST  = '172.31.5.200'
+        ANSIBLE_REMOTE_USER   = 'ubuntu'
+
+        APP_REMOTE_DIR        = '/home/ubuntu/simple-java-project'
+        PLAYBOOK_REMOTE_DIR   = '/home/ubuntu/Patch_automation'
+        ANSIBLE_PLAYBOOK      = 'deploy.yml'
+
         // Jenkins credential ID for an SSH username+private key credential
         // that can log into the Ansible control node.
         SSH_CRED_ID = 'ansible-control-ssh-creds'
     }
 
     stages {
+
+   stages {
 
         stage('Checkout') {
             steps {
@@ -81,7 +54,6 @@ pipeline {
                 )
             }
         }
-
         stage('Validate Parameters') {
             steps {
                 script {
@@ -103,18 +75,18 @@ pipeline {
             steps {
                 sshagent(credentials: ["${SSH_CRED_ID}"]) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${params.ANSIBLE_REMOTE_USER}@${params.ANSIBLE_CONTROL_HOST} '
+                        ssh -o StrictHostKeyChecking=no ${ANSIBLE_REMOTE_USER}@${ANSIBLE_CONTROL_HOST} '
                             set -e
-                            if [ -d "${params.APP_REMOTE_DIR}/.git" ]; then
-                                cd ${params.APP_REMOTE_DIR}
+                            if [ -d "${APP_REMOTE_DIR}/.git" ]; then
+                                cd ${APP_REMOTE_DIR}
                                 git fetch origin
                                 git checkout ${params.APP_GIT_BRANCH}
                                 git reset --hard origin/${params.APP_GIT_BRANCH}
                                 git clean -fdx
                             else
-                                rm -rf ${params.APP_REMOTE_DIR}
-                                mkdir -p \$(dirname ${params.APP_REMOTE_DIR})
-                                git clone -b ${params.APP_GIT_BRANCH} ${params.APP_GIT_REPO_URL} ${params.APP_REMOTE_DIR}
+                                rm -rf ${APP_REMOTE_DIR}
+                                mkdir -p \$(dirname ${APP_REMOTE_DIR})
+                                git clone -b ${params.APP_GIT_BRANCH} ${APP_GIT_REPO_URL} ${APP_REMOTE_DIR}
                             fi
                         '
                     """
@@ -126,21 +98,59 @@ pipeline {
             steps {
                 sshagent(credentials: ["${SSH_CRED_ID}"]) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${params.ANSIBLE_REMOTE_USER}@${params.ANSIBLE_CONTROL_HOST} '
+                        ssh -o StrictHostKeyChecking=no ${ANSIBLE_REMOTE_USER}@${ANSIBLE_CONTROL_HOST} '
                             set -e
-                            if [ -d "${params.PLAYBOOK_REMOTE_DIR}/.git" ]; then
-                                cd ${params.PLAYBOOK_REMOTE_DIR}
+                            if [ -d "${PLAYBOOK_REMOTE_DIR}/.git" ]; then
+                                cd ${PLAYBOOK_REMOTE_DIR}
                                 git fetch origin
                                 git checkout ${params.PLAYBOOK_GIT_BRANCH}
                                 git reset --hard origin/${params.PLAYBOOK_GIT_BRANCH}
                                 git clean -fdx
                             else
-                                rm -rf ${params.PLAYBOOK_REMOTE_DIR}
-                                mkdir -p \$(dirname ${params.PLAYBOOK_REMOTE_DIR})
-                                git clone -b ${params.PLAYBOOK_GIT_BRANCH} ${params.PLAYBOOK_GIT_REPO_URL} ${params.PLAYBOOK_REMOTE_DIR}
+                                rm -rf ${PLAYBOOK_REMOTE_DIR}
+                                mkdir -p \$(dirname ${PLAYBOOK_REMOTE_DIR})
+                                git clone -b ${params.PLAYBOOK_GIT_BRANCH} ${PLAYBOOK_GIT_REPO_URL} ${PLAYBOOK_REMOTE_DIR}
                             fi
                         '
                     """
+                }
+            }
+        }
+
+        stage('Verify Inventory Resolves Hosts') {
+            steps {
+                sshagent(credentials: ["${SSH_CRED_ID}"]) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${ANSIBLE_REMOTE_USER}@${ANSIBLE_CONTROL_HOST} '
+                            set -e
+                            cd ${PLAYBOOK_REMOTE_DIR}
+                            echo "Checking inventory file exists:"
+                            ls -la inventory/${params.TARGET_ENV}.ini
+                            echo "Hosts matched for --limit ${params.TARGET_ENV}:"
+                            MATCHED=\$(ansible-inventory -i inventory/${params.TARGET_ENV}.ini --list --limit ${params.TARGET_ENV} | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get(\\"_meta\\",{}).get(\\"hostvars\\",{})))")
+                            echo "Matched host count: \$MATCHED"
+                            if [ "\$MATCHED" -eq 0 ]; then
+                                echo "ERROR: No hosts matched inventory/${params.TARGET_ENV}.ini limit=${params.TARGET_ENV}"
+                                exit 1
+                            fi
+                        '
+                    """
+                }
+            }
+        }
+
+        stage('Approval') {
+            steps {
+                script {
+                    timeout(time: 30, unit: 'MINUTES') {
+                        input(
+                            id: 'DeployApproval',
+                            message: "Approve deployment of components [${params.COMPONENTS}] to ${params.TARGET_ENV}? (app branch: ${params.APP_GIT_BRANCH}, playbook branch: ${params.PLAYBOOK_GIT_BRANCH})",
+                            ok: 'Deploy'
+                            // Optional: restrict who can approve, e.g.:
+                            // submitter: 'admin,deploy-team'
+                        )
+                    }
                 }
             }
         }
@@ -149,11 +159,11 @@ pipeline {
             steps {
                 sshagent(credentials: ["${SSH_CRED_ID}"]) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${params.ANSIBLE_REMOTE_USER}@${params.ANSIBLE_CONTROL_HOST} \\
-                            "cd ${params.PLAYBOOK_REMOTE_DIR} && \\
-                             ansible-playbook -i inventory/${params.TARGET_ENV}.ini ${params.ANSIBLE_PLAYBOOK} \\
+                        ssh -o StrictHostKeyChecking=no ${ANSIBLE_REMOTE_USER}@${ANSIBLE_CONTROL_HOST} \\
+                            "cd ${PLAYBOOK_REMOTE_DIR} && \\
+                             ansible-playbook -i inventory/${params.TARGET_ENV}.ini ${ANSIBLE_PLAYBOOK} \\
                              --limit ${params.TARGET_ENV} \\
-                             --extra-vars 'deploy_components=${params.COMPONENTS} artifact_dir=${params.APP_REMOTE_DIR}'"
+                             --extra-vars 'deploy_components=${params.COMPONENTS} artifact_dir=${APP_REMOTE_DIR}'"
                     """
                 }
             }
