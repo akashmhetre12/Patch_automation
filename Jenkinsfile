@@ -116,26 +116,26 @@ pipeline {
         }
 
         stage('Verify Inventory Resolves Hosts') {
-            steps {
-                sshagent(credentials: ["${SSH_CRED_ID}"]) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${ANSIBLE_REMOTE_USER}@${ANSIBLE_CONTROL_HOST} '
-                            set -e
-                            cd ${PLAYBOOK_REMOTE_DIR}
-                            echo "Checking inventory file exists:"
-                            ls -la inventory/${params.TARGET_ENV}.ini
-                            echo "Hosts matched for --limit ${params.TARGET_ENV}:"
-                            MATCHED=\$(ansible-inventory -i inventory/${params.TARGET_ENV}.ini --list --limit ${params.TARGET_ENV} | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get(\\"_meta\\",{}).get(\\"hostvars\\",{})))")
-                            echo "Matched host count: \$MATCHED"
-                            if [ "\$MATCHED" -eq 0 ]; then
-                                echo "ERROR: No hosts matched inventory/${params.TARGET_ENV}.ini limit=${params.TARGET_ENV}"
-                                exit 1
-                            fi
-                        '
-                    """
-                }
-            }
+    steps {
+        sshagent(credentials: ["${SSH_CRED_ID}"]) {
+            sh """
+                ssh -o StrictHostKeyChecking=no ${ANSIBLE_REMOTE_USER}@${ANSIBLE_CONTROL_HOST} '
+                    set -e
+                    cd ${PLAYBOOK_REMOTE_DIR}
+                    echo "Checking inventory file exists:"
+                    ls -la inventory/${params.TARGET_ENV}.ini
+                    echo "Hosts matched for --limit ${params.TARGET_ENV}:"
+                    MATCHED=\$(ansible ${params.TARGET_ENV} -i inventory/${params.TARGET_ENV}.ini --list-hosts 2>/dev/null | tail -n +2 | grep -c "\\S" || true)
+                    echo "Matched host count: \$MATCHED"
+                    if [ "\$MATCHED" -eq 0 ]; then
+                        echo "ERROR: No hosts matched inventory/${params.TARGET_ENV}.ini limit=${params.TARGET_ENV}"
+                        exit 1
+                    fi
+                '
+            """
         }
+    }
+}
 
         stage('Approval') {
             steps {
